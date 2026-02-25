@@ -64,6 +64,21 @@ graph TD
 
 ### 1️⃣ 环境配置
 
+#### 使用 uv 创建虚拟环境（推荐）
+
+```bash
+# 创建 uv 虚拟环境
+uv venv --python 3.12
+
+# 激活环境
+source .venv/bin/activate
+
+# 安装依赖
+uv pip install requests python-dotenv openai
+```
+
+#### 配置环境变量
+
 克隆项目后，配置 `.env` 文件：
 
 ```bash
@@ -98,6 +113,9 @@ python3 main.py --auto
 #### 独立执行各模块
 
 ```bash
+# 确保已激活 uv 虚拟环境
+source .venv/bin/activate
+
 # 1. 下载最新试验数据
 python3 daily_ctgov_check_tgbot.py
 
