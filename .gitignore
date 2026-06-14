@@ -60,3 +60,8 @@ discord.md
 
 # Config examples (keep .env.example)
 .env
+
+# GeWe 调试用文件(含真实凭据,禁止提交)
+sample_gewe_*.py
+curl_*_push.md
+kick_off_member.py

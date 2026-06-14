@@ -43,6 +43,17 @@ graph TD
 - **双协议支持**：基于 CTGov API v2，支持智谱 GLM-4 与 Gemini 双模型
 - **中国中心识别**：自动检索试验中心列表，含有中国医院的试验将加上高亮标记
 - **极简简报**：生成包含 NCT ID、标题、阶段、发起方及中国中心信息的极简 TG 推送
+- **多渠道推送**：支持 Telegram + 微信群（GeWe）双通道同步推送，详见下方[微信群推送](#-微信群推送gewe)
+
+#### 💬 微信群推送（GeWe）
+
+在 TG 推送基础上集成 [GeWe](https://api.geweapi.com) 个人微信群推送，与 TG **消息内容完全一致**，并额外支持可跳转卡片：
+
+- **多群循环推送**：`GEWE_TO_WXID` 支持 JSON 数组 / 逗号分隔 / 单群三种写法，逐个群独立重试、**失败隔离**（某群失败不影响其他群）
+- **可跳转卡片**：基于手动测试通过的 `appmsg` XML 模板，每个试验生成一张卡片，点击跳转 ClinicalTrials.gov 详情页
+- **🇨🇳 中国优先**：含中国中心的试验在**标题前缀 + 描述末尾**双重标注 `🇨🇳 中国有中心（优先关注）`
+- **公众号适配**：Markdown 自动转纯文本（`#`→去掉、`**`→去掉、`-`→`•`、`[文](url)`→`文(url)`），按 `GEWE_MSG_MAX_LEN` 自动分批并加 `(续 i/n)` 尾标
+- **零侵入**：与 TG 推送并列调用，复用已翻译内容，无额外 LLM 成本；微信失败不影响 TG 主渠道
 
 ### 2. RAG 全量精翻 (`ctgov_full_sync_rag.py`)
 
@@ -96,7 +107,18 @@ FASTGPT_LOCAL_DIR=["/path/to/output", "/path/to/trials"]
 # Telegram 配置
 TELEGRAM_BOT_TOKEN=your_token
 TELEGRAM_CHAT_ID=your_id
+
+# 微信群推送配置 (GeWe 平台,可选)
+GEWE_ENABLED=false                    # 总开关
+GEWE_API_HOST=api.geweapi.com
+GEWE_APP_ID=your_gewe_app_id
+GEWE_TOKEN=your_gewe_token
+# 多群用 JSON 数组(推荐)或逗号分隔
+GEWE_TO_WXID=["group-wxid-1","group-wxid-2"]
+GEWE_CARD_MODE=true                  # true=每个试验发可跳转卡片
 ```
+
+> 💡 微信推送默认关闭（`GEWE_ENABLED=false`），不配置凭据也能正常运行；开启后缺失凭据会自动跳过，不影响 Telegram 主渠道。
 
 ### 2️⃣ 运行方式
 
@@ -199,6 +221,15 @@ python3 fastgpt_sync.py --once --mode=all    # 全部含历史
 ---
 
 ## 📝 更新日志
+
+### v2.1.0 (2026-06-14)
+
+- **💬 微信群推送（GeWe）**：在 TG 推送基础上新增微信群推送通道，消息内容与 TG 一致
+  - 多群循环推送，JSON 数组/逗号分隔/单群三种配置写法，失败隔离
+  - 基于 `appmsg` XML 的可跳转卡片，点击直达 ClinicalTrials.gov 详情页
+  - 🇨🇳 中国试验双重标注（标题前缀 + 描述末尾）
+  - Markdown 转纯文本 + 按长度分批 + 失败重试 + 开关可控
+- **🔧 安全加固**：脱敏 `.env.example` 中的真实密钥并清洗 git 历史；含凭据的调试文件统一加入 `.gitignore`
 
 ### v2.0.0 (2026-01-29)
 
