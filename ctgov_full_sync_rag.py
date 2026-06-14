@@ -2,95 +2,22 @@ import os
 import json
 import requests
 from datetime import datetime
-from openai import OpenAI
 from dotenv import load_dotenv
 from pathlib import Path
 
 # 加载环境变量
 load_dotenv()
 
-# LLM 配置
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "zhipu").lower()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-# 智谱配置
-ZHIPU_API_KEY = os.getenv("zhipu_api_key")
-ZHIPU_BASE_URL = os.getenv("zhipu_base_url", "https://open.bigmodel.cn/api/paas/v4")
-ZHIPU_MODEL_NAME = os.getenv("zhipu_model_name", "glm-4-air")
-
-# Gemini 配置
-GEMINI_API_KEY = os.getenv("gemini_api_key")
-GEMINI_BASE_URL = os.getenv("gemini_base_url")
-GEMINI_MODEL_NAME = os.getenv("gemini_model_name", "gemini-3-flash-preview")
-
-# 初始化 LLM 客户端
-def get_llm_client():
-    if LLM_PROVIDER == "zhipu":
-        if not ZHIPU_API_KEY:
-            print("Warning: ZHIPU_API_KEY is not set.")
-            return None
-        return OpenAI(api_key=ZHIPU_API_KEY, base_url=ZHIPU_BASE_URL, timeout=60.0)
-    elif LLM_PROVIDER == "gemini":
-        # Gemini 使用原生 REST 调用，无需 OpenAI 客户端
-        return None
-    else:
-        if not OPENAI_API_KEY:
-            return None
-        return OpenAI(api_key=OPENAI_API_KEY, timeout=60.0)
-
-client = get_llm_client()
-
-def get_llm_model():
-    if LLM_PROVIDER == "zhipu":
-        return ZHIPU_MODEL_NAME
-    elif LLM_PROVIDER == "gemini":
-        return GEMINI_MODEL_NAME
-    return "gpt-4o"
+# LLM 配置已抽取到 lib/llm_client.py(消除多文件重复)
+# 全文翻译使用 PROMPT_FULL_MARKDOWN(保留原有 Markdown 结构)
+from lib.llm_client import translate_text as _translate_base, PROMPT_FULL_MARKDOWN, client, LLM_PROVIDER
 
 def translate_text(text):
-    if not text:
-        return text
-    
-    # 智谱或 OpenAI 协议处理
-    if LLM_PROVIDER != "gemini":
-        if not client:
-            return text
-        try:
-            response = client.chat.completions.create(
-                model=get_llm_model(),
-                messages=[
-                    {"role": "system", "content": "你是一个专业的医学翻译助手。请将以下临床试验全量内容翻译成专业中文。要求：严格保留原有 Markdown 结构，术语准确，不要添加任何额外解释。"},
-                    {"role": "user", "content": text}
-                ],
-                temperature=0.1
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"Translation error ({LLM_PROVIDER}): {e}")
-            return text
-    
-    # Gemini 原生 REST 协议处理
-    else:
-        if not GEMINI_API_KEY:
-            return text
-        url = f"{GEMINI_BASE_URL.rstrip('/')}/{GEMINI_MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{
-                "parts": [{"text": f"你是一个专业的医学翻译助手。请将以下临床试验全量内容翻译成专业中文。要求：1. 严格保留原有 Markdown 结构（标题、列表、加粗等）。2. 术语翻译要极其准确（例如入组标准、研究终点）。3. 不要输出翻译结果以外的内容。文本内容如下：\n\n{text}"}]
-            }],
-            "generationConfig": {
-                "temperature": 0.1
-            }
-        }
-        headers = {"Content-Type": "application/json"}
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=120)
-            response.raise_for_status()
-            res_data = response.json()
-            return res_data['candidates'][0]['content']['parts'][0]['text'].strip()
-        except Exception as e:
-            print(f"Translation error (Gemini REST): {e}")
-            return text
+    """
+    全文 Markdown 翻译(保留原有结构),失败返回原文。
+    委托给 lib.llm_client.translate_text,使用全文翻译 prompt。
+    """
+    return _translate_base(text, system_prompt=PROMPT_FULL_MARKDOWN, retry=1, timeout=120)
 
 def format_to_markdown_en(study):
     protocol = study.get("protocolSection", {})
