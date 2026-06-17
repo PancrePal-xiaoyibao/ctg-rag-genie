@@ -4,7 +4,7 @@
 
 一套针对胰腺癌（Pancreatic Cancer）设计的闭环情报系统：从 ClinicalTrials.gov 自动抓取、双路径处理（TG 推送 + 全文精翻）、深度清洗，并自动同步至 FastGPT 私有化 RAG 知识库。
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.2.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![FastGPT](https://img.shields.io/badge/sync-FastGPT-brightgreen)
 
@@ -12,20 +12,72 @@
 
 ## 🎯 核心业务流程
 
+系统采用 **两阶段分离架构**:阶段 1 批量处理所有试验(下载→翻译→落地),阶段 2 各推送渠道从已生成的内容中消费。这避免了「单篇下载翻译就推送导致中途卡住」的问题。
+
 ```mermaid
 graph TD
-    A[ClinicalTrials.gov] --> B{主控台 main.py}
-    B --> C[自动流程模式]
-    B --> D[手动菜单模式]
-  
-    C --> C1[下载试验数据]
-    C1 --> C2[全文翻译 RAG]
-    C2 --> C3[同步到 FastGPT]
-  
-    D --> D1[单独执行各步骤]
-    D1 --> D2[查看同步状态]
-    D2 --> D3[切换上传模式]
+    A[ClinicalTrials.gov API] --> B[阶段1: 批量处理]
+
+    subgraph 阶段1[阶段 1: 下载→翻译→落地]
+        B --> C[fetch_studies 抓取过滤]
+        C --> D[translate_text 批量翻译]
+        D --> E1[落地 JSON<br/>sync_status=pending]
+        D --> E2[生成汇总清单+分组详情]
+        D --> E3[生成报告文件]
+    end
+
+    E1 --> F[阶段2: 分别推送]
+
+    subgraph 阶段2[阶段 2: 格式转化→各渠道推送]
+        F --> G1[TG / GeWe文字<br/>消费 summary + detail_groups]
+        F --> G2[GeWe卡片 / 飞书卡片<br/>消费 study 对象]
+        F --> G3[FastGPT 知识库<br/>从 JSON 消费]
+    end
+
+    G3 --> H1[RAG 翻译<br/>cn/*-zh.md]
+    H1 --> H2[FastGPT 同步]
 ```
+
+### 📦 内容链路与文件流转
+
+不同推送渠道消费的内容源**完全独立**,各有专属格式:
+
+| 内容类型 | 消费渠道 | 文件/数据 | 说明 |
+|---------|---------|----------|------|
+| **汇总清单 + 分组详情** | TG、GeWe 文字 | `telegram_push_report.txt` | 简报格式,Markdown 文本 |
+| **原始 study 对象** | GeWe 卡片、飞书卡片 | 内存中 | 结构化字段(标题/状态/联系人等) |
+| **完整翻译 Markdown** | FastGPT 知识库 | `cn/{date}-{NCT}-{title}-zh.md` | 每篇独立完整精翻 |
+
+### 🔬 FastGPT RAG 知识库的三步链路
+
+FastGPT 推送的是**单个 study 的完整翻译文档**,而非汇总内容。完整链路:
+
+```
+阶段1 落地
+  study JSON → output/{date}-Pancreatic_Cancer/{NCT}.json
+               sync_status = "pending"  ← 待处理标记
+                  │
+                  ▼
+阶段2-fastgpt 第1步 (ctgov_full_sync_rag.py:run_rag_translation)
+  扫描所有 sync_status=="pending" 的 JSON
+  对每个 study:
+    ① format_to_markdown_en(study) → 完整英文 Markdown
+    ② translate_text(全文)         → 精翻中文 Markdown
+    ③ 落地两个文件:
+       output/{date}-Pancreatic_Cancer/en/{date}-{NCT}-{title}.md     ← 英文原文
+       output/{date}-Pancreatic_Cancer/cn/{date}-{NCT}-{title}-zh.md  ← 中文精翻
+    ④ JSON 的 sync_status 改为 "synced"
+
+阶段2-fastgpt 第2步 (fastgpt_sync.py --once)
+  扫描所有含 "-zh" 的 .md 文件(中文精翻版)
+  按 NCT 编号去重 + 内容 hash 去重
+  上传到 FastGPT 知识库(按父目录名归类集合)
+```
+
+**关键约定**:
+- JSON 的 `sync_status` 字段是 RAG 与抓取阶段的**隐式契约**:`pending` → 待翻译,`synced` → 已处理
+- 中文精翻文件统一加 `-zh` 后缀,这是 FastGPT 同步的**过滤标识**
+- `--mode=today` 时只传当天日期前缀的文件;`--mode=all` 传历史全部
 
 ---
 
@@ -37,6 +89,7 @@ graph TD
 - **手动菜单**：独立控制各个步骤
 - **模式切换**：支持"仅当天"或"全部含历史"上传模式
 - **状态监控**：实时查看 FastGPT 同步状态
+- **📤 推送已有报告**：独立推送已生成的报告文件到各渠道（v2.2.0 新增）
 
 ### 1. 自动化情报抓取 (`daily_ctgov_check_tgbot.py`)
 
@@ -132,6 +185,25 @@ python3 main.py
 python3 main.py --auto
 ```
 
+#### 💡 新功能：推送已有报告
+
+适用于已生成报告，需要补发到某个渠道或测试推送功能的场景：
+
+```bash
+# 推送最新报告到 GeWe 文字
+python3 push_existing_report.py --latest --send-gewe-txt
+
+# 推送指定文件到多个渠道
+python3 push_existing_report.py --file output/2026-06-17-Pancreatic_Cancer/telegram_push_report.txt --channels tg,gewe_txt,feishu
+
+# 推送到所有支持的渠道
+python3 push_existing_report.py --latest --all-channels
+
+# 或通过交互式菜单：main.py → 手动菜单 → 推送已有报告
+```
+
+详细使用说明参见：[docs/push_existing_report_usage.md](./docs/push_existing_report_usage.md)
+
 #### 独立执行各模块
 
 ```bash
@@ -156,16 +228,29 @@ python3 fastgpt_sync.py --once --mode=all    # 全部含历史
 ```text
 .
 ├── main.py              # 🆕 主控台脚本
+├── push_existing_report.py  # 🆕 独立推送已有报告工具 (v2.2.0)
 ├── output/              # 文档落地根目录
 │   └── {Date-Topic}/    # 课题子目录
 │       ├── cn/          # RAG 专用中文 Markdown (同步目标)
-│       └── en/          # 原始英文 Markdown
+│       ├── en/          # 原始英文 Markdown
+│       └── telegram_push_report.txt  # 推送报告文件
 ├── cache/               # CTGov 数据本地缓存
 ├── data/
 │   └── fastgpt_sync_state.json  # FastGPT 同步指纹库（NCT去重）
+├── docs/
+│   └── push_existing_report_usage.md  # 🆕 推送已有报告使用文档
+├── lib/                 # 🆕 公共模块库
+│   ├── channels/        # 推送渠道模块
+│   │   ├── telegram.py  # Telegram 推送
+│   │   ├── gewe.py      # GeWe 微信群推送
+│   │   └── feishu.py    # 飞书推送
+│   ├── ctgov_api.py     # ClinicalTrials.gov API 封装
+│   ├── content_builder.py  # 推送内容构建器
+│   └── config.py        # 配置管理
 ├── fastgpt_sync.py      # FastGPT 同步引擎
 ├── ctgov_full_sync_rag.py # 全文精翻引擎
 ├── daily_ctgov_check_tgbot.py # TG 简报推送
+├── config.yaml          # 🆕 渠道与流程配置
 └── .env                 # 核心环境配置
 ```
 
@@ -220,7 +305,29 @@ python3 fastgpt_sync.py --once --mode=all    # 全部含历史
 
 ---
 
+## 📚 开发文档
+
+项目维护了以下开发文档，便于查阅和追溯：
+
+- **[dev.log](./dev.log)** - 开发日志，记录功能开发过程、问题排查和解决方案
+- **[docs/fastgpt_datasets_list.md](./docs/fastgpt_datasets_list.md)** - FastGPT 数据集列表（113个），包含数据集名称和 ID，便于快速查找和引用
+- **[QUICKSTART.md](./QUICKSTART.md)** - 快速入门指南，详细介绍环境配置和首次运行步骤
+
+---
+
 ## 📝 更新日志
+
+### v2.2.0 (2026-06-17)
+
+- **📤 独立推送已有报告功能**：新增 `push_existing_report.py` 工具，支持将已生成的报告文件独立推送到各渠道
+  - 支持指定文件路径或自动查找最新报告
+  - 支持推送到 Telegram、GeWe 文字、飞书等渠道
+  - 支持多渠道同时推送（`--all-channels` / `--channels`）
+  - 自动解析报告文件格式（汇总、详情分组、结尾）
+  - 在 `main.py` 手动菜单中新增交互式推送入口
+  - 使用场景：补发报告、测试推送、定时推送、批量补发历史报告
+- **🔧 代码重构**：推送渠道模块化，抽取到 `lib/channels/` 目录，提高代码复用性
+- **📚 文档完善**：新增 `docs/push_existing_report_usage.md` 详细使用文档
 
 ### v2.1.0 (2026-06-14)
 
@@ -255,4 +362,4 @@ python3 fastgpt_sync.py --once --mode=all    # 全部含历史
 ---
 
 **作者**：感谢❤️小胰宝社区志愿者团队的❤️开源  
-**最后更新**：2026-01-29
+**最后更新**：2026-06-17

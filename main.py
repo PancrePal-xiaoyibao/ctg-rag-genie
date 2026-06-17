@@ -149,38 +149,13 @@ def build_parser():
 
 
 def resolve_channels(args):
-    """合并 --send-* / --channels / --all-channels / --no-channels,返回最终渠道列表"""
-    channels = set()
-
-    # 1. --send-* 开关
-    if args.send_tg:
-        channels.add("tg")
-    if args.send_gewe_card:
-        channels.add("gewe_card")
-    if args.send_gewe_txt:
-        channels.add("gewe_txt")
-    if args.send_feishu:
-        channels.add("feishu")
-    if args.send_fastgpt:
-        channels.add("fastgpt")
-
-    # 2. --channels 简写
-    if args.channels:
-        for ch in args.channels.split(","):
-            ch = ch.strip()
-            if ch:
-                channels.add(ch)
-
-    # 3. --all-channels
-    if args.all_channels:
-        channels.update(ALL_CHANNELS)
-
-    # 4. --no-channels 排除
-    if args.no_channels:
-        for ch in args.no_channels.split(","):
-            channels.discard(ch.strip())
-
-    return sorted(channels)
+    """
+    合并 CLI 参数与 config.yaml 默认值,返回最终渠道列表。
+    优先级:CLI 显式参数(--send-* / --channels / --all-channels) > config.yaml 默认
+    委托给 lib.config.resolve_channels_from_args。
+    """
+    from lib.config import resolve_channels_from_args
+    return resolve_channels_from_args(args)
 
 
 def has_fetch_filters(args):
@@ -191,56 +166,94 @@ def has_fetch_filters(args):
             args.send_gewe_txt or args.send_feishu or args.send_fastgpt)
 
 
-# ============ 推送调度 ============
-def dispatch_push(channel, studies):
-    """将 studies 分发到指定渠道"""
-    print(f"\n📤 推送到渠道: {channel}({len(studies)} 个试验)")
+# ============ 推送调度(阶段2:各渠道从已生成 content 消费)============
+def dispatch_push(channel, content):
+    """
+    将已生成的内容分发到指定渠道。
+    content 来自 build_push_content() 的返回值,包含:
+        studies / summary_msg / detail_groups / footer / study_details
+
+    各渠道按需消费,互不耦合:
+        tg       → summary_msg + detail_groups + footer(完整 TG 编排)
+        gewe_txt → summary_msg + detail_groups + footer(转纯文本分批, TG 切片格式)
+        gewe_card→ studies(逐个生成 appmsg 卡片)
+        feishu   → studies(逐个生成飞书卡片)
+        fastgpt  → 不直接用 content,而是从落地的 JSON 消费(RAG 翻译+同步)
+    """
+    studies = content["studies"]
+    summary_msg = content["summary_msg"]
+    detail_groups = content["detail_groups"]
+    footer = content["footer"]
+    total = len(studies)
+
+    print(f"\n📤 推送到渠道: {channel}({total} 个试验)")
     try:
         if channel == "tg":
             from lib.channels.telegram import send_msg
-            from daily_ctgov_check_tgbot import send_telegram_combined
-            # TG 用完整的编排(汇总+分组+footer)
-            send_telegram_combined(studies)
+            # TG 完整编排:汇总 → 分组详情 → footer
+            send_msg(summary_msg)
+            for detail in detail_groups:
+                send_msg(detail)
+            send_msg(footer)
+            print(f"   TG: 汇总 + {len(detail_groups)} 组详情 + footer 已发送")
+
+        elif channel == "gewe_txt":
+            # GeWe 文字:用 TG 的切片格式(Markdown 转纯文本 + 按长度分批)
+            # send_text 内部已做 markdown_to_plain + split_text_by_len
+            from lib.channels.gewe import send_text
+            send_text(summary_msg)
+            for detail in detail_groups:
+                send_text(detail)
+            send_text(footer)
+            print(f"   GeWe 文字: 汇总 + {len(detail_groups)} 组详情 + footer 已发送")
+
         elif channel == "gewe_card":
+            # GeWe 卡片:逐个 study 生成 appmsg 卡片(需 --send-gewe-card 显式开启)
             from lib.channels.gewe import send_cards_batch
             ok = send_cards_batch(studies)
-            print(f"   GeWe 卡片: {ok}/{len(studies)} 发送成功")
-        elif channel == "gewe_txt":
-            from lib.channels.gewe import send_text
-            # 文字模式:发一条汇总
-            summary = f"# 🏥 临床试验日报\n\n发现 {len(studies)} 个试验\n"
-            for i, s in enumerate(studies[:10], 1):
-                from lib.ctgov_api import get_nct_id, has_china_center
-                nct = get_nct_id(s)
-                marker = "🇨🇳 " if has_china_center(s) else ""
-                summary += f"\n{i}. {marker}{nct}"
-            send_text(summary)
+            print(f"   GeWe 卡片: {ok}/{total} 发送成功")
+
         elif channel == "feishu":
+            # 飞书:逐个 study 生成交互式卡片
             from lib.channels.feishu import send_cards_batch
             ok = send_cards_batch(studies)
-            print(f"   飞书卡片: {ok}/{len(studies)*1} 发送成功")
+            print(f"   飞书卡片: {ok} 发送成功")
+
         elif channel == "fastgpt":
+            # FastGPT:不消费 content,而是从落地的 JSON 消费
+            # 第1步 RAG 翻译(pending JSON → cn/*-zh.md),第2步 同步到 FastGPT
             from lib.channels.fastgpt import run_rag_translation, send_to_fastgpt
-            print("   步骤 1/2: 全文翻译(RAG)...")
-            run_rag_translation()
-            print("   步骤 2/2: 同步到 FastGPT...")
+            from lib.config import get_workflow_setting
+            translate_first = get_workflow_setting("fastgpt_translate_first", True)
+            if translate_first:
+                print("   步骤 1/2: 全文翻译(RAG,pending JSON → cn/*-zh.md)...")
+                run_rag_translation()
+            print(f"   步骤 {'2/2' if translate_first else '1/1'}: 同步到 FastGPT (mode={UPLOAD_MODE})...")
             send_to_fastgpt(mode=UPLOAD_MODE)
+
         else:
             print(f"   ⚠️  未知渠道: {channel}")
     except Exception as e:
         print(f"   ❌ 渠道 {channel} 推送失败: {e}")
 
 
-# ============ CLI 主流程 ============
+# ============ CLI 主流程(两阶段分离)============
 def run_cli_mode(args):
-    """CLI 模式:抓取 + 推送"""
+    """
+    CLI 模式:两阶段分离执行。
+    阶段1:批量抓取 → 翻译 → 落地 JSON → 生成汇总/详情内容(build_push_content)
+    阶段2:各推送渠道从已生成内容消费(dispatch_push)
+    """
     from lib.ctgov_api import fetch_studies, get_nct_id, has_china_center
+    from lib.content_builder import build_push_content
+    from lib.config import get_workflow_setting
 
     print_banner()
 
-    # 抓取
+    # ==================== 阶段1:抓取 + 翻译 + 落地 + 生成内容 ====================
     sort = "LastUpdatePostDate:desc" if args.latest else None
-    print(f"🔍 抓取试验: condition={args.condition or '默认'}, china={args.china}, top={args.top}, days_back={args.days_back}")
+    print(f"🔍 阶段1:抓取试验(condition={args.condition or '默认'}, china={args.china}, top={args.top}, days_back={args.days_back})")
+
     studies = fetch_studies(
         condition=args.condition,
         status=args.status,
@@ -264,25 +277,27 @@ def run_cli_mode(args):
     if len(studies) > 5:
         print(f"   ... 共 {len(studies)} 个")
 
-    # 落地 JSON(无论是否推送,都落地供后续 RAG 使用)
-    from lib.study_data import save_study_json
-    print(f"\n💾 落地 JSON...")
-    for s in studies:
-        save_study_json(s, extra_fields={"fetch_mode": "cli", "china_only": args.china})
-    print(f"   已落地 {len(studies)} 个 JSON")
+    # 一次性翻译 + 落地 JSON + 生成内容(不再单篇推送)
+    auto_save = get_workflow_setting("auto_save_json", True)
+    print(f"\n🔄 阶段1:批量翻译 + 落地 JSON + 生成推送内容...")
+    content = build_push_content(studies, auto_save_json=auto_save)
+    if not content:
+        print("⚠️  内容生成失败")
+        return
+    print(f"   ✅ 翻译完成:{len(studies)} 个试验,生成 {len(content['detail_groups'])} 组详情")
 
-    # 推送
+    # ==================== 阶段2:各渠道推送 ====================
     channels = resolve_channels(args)
     if not channels:
-        print("\n📋 未指定推送渠道(仅抓取+落地完成)。如需推送,加 --send-* 或 --channels 参数")
+        print(f"\n📋 阶段1完成(翻译+落地),未指定推送渠道。如需推送,加 --send-* / --channels / --all-channels")
         return
 
-    print(f"\n📤 推送到 {len(channels)} 个渠道: {', '.join(channels)}")
+    print(f"\n📤 阶段2:推送到 {len(channels)} 个渠道: {', '.join(channels)}")
     for ch in channels:
-        dispatch_push(ch, studies)
+        dispatch_push(ch, content)
 
     print(f"\n{'='*60}")
-    print(f"✅ 全部完成:抓取 {len(studies)} 个,推送 {len(channels)} 个渠道")
+    print(f"✅ 全部完成:阶段1 抓取翻译 {len(studies)} 个,阶段2 推送 {len(channels)} 个渠道")
     print(f"{'='*60}")
 
 
@@ -327,6 +342,92 @@ def toggle_upload_mode():
         print("\n✅ 已切换到: 仅当天")
 
 
+def push_existing_report_menu():
+    """推送已有报告的交互菜单"""
+    from pathlib import Path
+    
+    print(f"\n{'='*60}")
+    print("📤 推送已有报告")
+    print(f"{'='*60}\n")
+    
+    # 查找可用的报告文件
+    output_path = Path("output")
+    if not output_path.exists():
+        print("❌ output 目录不存在")
+        return
+    
+    report_files = list(output_path.glob("*/telegram_push_report.txt"))
+    if not report_files:
+        print("❌ 未找到任何报告文件")
+        return
+    
+    # 按修改时间排序
+    report_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    
+    # 显示可用的报告
+    print("可用的报告文件:\n")
+    print("0️⃣  最新报告 (自动选择)")
+    for i, report_file in enumerate(report_files[:10], 1):  # 最多显示10个
+        folder_name = report_file.parent.name
+        mtime = datetime.fromtimestamp(report_file.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+        print(f"{i}️⃣  {folder_name} ({mtime})")
+    
+    if len(report_files) > 10:
+        print(f"... 还有 {len(report_files) - 10} 个报告")
+    
+    # 选择报告
+    choice = input("\n请选择报告 [0-{}]: ".format(min(len(report_files), 10))).strip()
+    
+    try:
+        choice_idx = int(choice)
+        if choice_idx == 0:
+            selected_file = report_files[0]
+        elif 1 <= choice_idx <= min(len(report_files), 10):
+            selected_file = report_files[choice_idx - 1]
+        else:
+            print("❌ 无效选项")
+            return
+    except ValueError:
+        print("❌ 请输入数字")
+        return
+    
+    print(f"\n✅ 已选择: {selected_file}")
+    
+    # 选择推送渠道
+    print("\n请选择推送渠道:\n")
+    print("1️⃣  Telegram")
+    print("2️⃣  GeWe 文字")
+    print("3️⃣  飞书")
+    print("4️⃣  所有渠道 (Telegram + GeWe 文字 + 飞书)")
+    print("5️⃣  自定义")
+    
+    channel_choice = input("\n请选择 [1-5]: ").strip()
+    
+    channel_args = []
+    if channel_choice == "1":
+        channel_args = ["--send-tg"]
+    elif channel_choice == "2":
+        channel_args = ["--send-gewe-txt"]
+    elif channel_choice == "3":
+        channel_args = ["--send-feishu"]
+    elif channel_choice == "4":
+        channel_args = ["--all-channels"]
+    elif channel_choice == "5":
+        custom = input("请输入渠道(逗号分隔,如 tg,gewe_txt,feishu): ").strip()
+        if custom:
+            channel_args = ["--channels", custom]
+        else:
+            print("❌ 未输入渠道")
+            return
+    else:
+        print("❌ 无效选项")
+        return
+    
+    # 执行推送
+    cmd_args = ["--file", str(selected_file)] + channel_args
+    run_step("push_existing_report.py", "推送已有报告", cmd_args)
+
+
 def manual_menu():
     """手动菜单模式:单独执行各个步骤(向后兼容)"""
     while True:
@@ -338,10 +439,11 @@ def manual_menu():
         print("3️⃣  同步到 FastGPT (fastgpt_sync.py --once)")
         print("4️⃣  查看 FastGPT 同步状态")
         print("5️⃣  切换上传模式 (当天/全部)")
-        print("6️⃣  返回主菜单")
+        print("6️⃣  推送已有报告到各渠道")
+        print("7️⃣  返回主菜单")
         print("0️⃣  退出系统")
 
-        choice = input("\n请选择操作 [0-6]: ").strip()
+        choice = input("\n请选择操作 [0-7]: ").strip()
 
         if choice == "1":
             run_step("daily_ctgov_check_tgbot.py", "下载最新临床试验")
@@ -354,6 +456,8 @@ def manual_menu():
         elif choice == "5":
             toggle_upload_mode()
         elif choice == "6":
+            push_existing_report_menu()
+        elif choice == "7":
             break
         elif choice == "0":
             print("\n👋 感谢使用小胰宝临床试验订阅系统！")
