@@ -21,8 +21,8 @@ workflow:
   auto_save_json: true
   # fastgpt 渠道是否自动执行全文翻译(run_rag_translation)再同步
   fastgpt_translate_first: true
-  # GeWe 文字分批:单条消息长度上限
-  gewe_txt_max_len: 2000
+  # GeWe 文字分批:单条消息长度上限(默认 500，避免微信折叠)
+  gewe_txt_max_len: 500
 
 # ==================== 翻译模型 fallback 链 ====================
 # 顺序即优先级:第 1 个是主力模型,失败时依次尝试后续模型。

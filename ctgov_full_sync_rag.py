@@ -10,7 +10,7 @@ load_dotenv()
 
 # LLM 配置已抽取到 lib/llm_client.py(消除多文件重复)
 # 全文翻译使用 PROMPT_FULL_MARKDOWN(保留原有 Markdown 结构)
-from lib.llm_client import translate_text as _translate_base, PROMPT_FULL_MARKDOWN, client, LLM_PROVIDER
+from lib.llm_client import translate_text as _translate_base, PROMPT_FULL_MARKDOWN
 
 def translate_text(text):
     """
