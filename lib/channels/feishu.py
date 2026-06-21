@@ -62,7 +62,7 @@ def build_card(data):
     return {
         "config": {"wide_screen_mode": True},
         "header": {
-            "title": {"tag": "plain_text", "content": "🔬 胰腺癌临床试验每日更新"},
+            "title": {"tag": "plain_text", "content": "🔬 临床试验情报更新"},
             "template": "orange"
         },
         "elements": [

@@ -1,12 +1,13 @@
-# 胰腺癌临床试验自动化情报与 RAG 知识库系统
+# 临床试验自动化情报与 RAG 知识库系统
 
-**Pancreatic Cancer Clinical Trials Automation & RAG System**
+**Clinical Trials Automation & RAG System — 多癌症/病种通用平台**
 
-一套针对胰腺癌（Pancreatic Cancer）设计的闭环情报系统：从 ClinicalTrials.gov 自动抓取、双路径处理（TG 推送 + 全文精翻）、深度清洗，并自动同步至 FastGPT 私有化 RAG 知识库。
+一套支持**多种癌症与罕见病**的闭环情报系统：从 ClinicalTrials.gov 自动抓取、双路径处理（TG 推送 + 全文精翻）、深度清洗，并自动同步至 FastGPT 私有化 RAG 知识库。覆盖胰腺癌、乳腺癌、肺癌、胃癌等各类癌症及罕见病，一次部署按需切换病种。
 
-![Version](https://img.shields.io/badge/version-2.2.0-blue)
+![Version](https://img.shields.io/badge/version-3.0.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![FastGPT](https://img.shields.io/badge/sync-FastGPT-brightgreen)
+![Diseases](https://img.shields.io/badge/diseases-多癌症/罕见病-orange)
 
 ---
 
@@ -185,6 +186,24 @@ python3 main.py
 python3 main.py --auto
 ```
 
+#### 🌐 切换病种（v3.0.0 新增）
+
+支持任意癌症/罕见病，通过 `--condition` 临时切换或改 `.env` 的 `SEARCH_CONDITION` 长期固定：
+
+```bash
+# 各类癌症
+python3 main.py --top 1 --condition "Breast Cancer" --china --send-gewe-txt    # 乳腺癌
+python3 main.py --top 1 --condition "Lung Cancer" --china --send-gewe-txt      # 肺癌
+python3 main.py --top 1 --condition "Gastric Cancer" --china --send-gewe-txt   # 胃癌
+python3 main.py --top 1 --condition "Colorectal Cancer" --china                # 结直肠癌(仅抓取不推送)
+
+# 罕见病也支持(英文名即可,未映射中文会原样显示)
+python3 main.py --top 5 --condition "Gaucher Disease" --china                  # 戈谢病
+python3 main.py --top 5 --condition "Pancreatic Cancer" --china                # 胰腺癌(默认)
+```
+
+目录、标题、footer、FastGPT 集合会自动按病种区分。新增病种中文映射见 `lib/branding.py` 的 `_DISEASE_CN`。
+
 #### 💡 新功能：推送已有报告
 
 适用于已生成报告，需要补发到某个渠道或测试推送功能的场景：
@@ -316,6 +335,19 @@ python3 fastgpt_sync.py --once --mode=all    # 全部含历史
 ---
 
 ## 📝 更新日志
+
+### v3.0.0 (2026-06-21) — 多癌症/病种支持
+
+- **🌐 多病种通用平台**：从胰腺癌单病种升级为多癌症/病种通用平台，支持任意疾病（各类癌症、罕见病等），无需为不同疾病新建仓库
+  - 疾病由 `.env` 的 `SEARCH_CONDITION` 或命令行 `--condition` 控制，一次运行一种疾病
+  - 落地目录、FastGPT 集合自动按疾病分（`output/{date}-{disease}/`）
+  - 修复 `--condition` 不同步落地目录名的 bug
+  - 已验证：胰腺癌、乳腺癌、胃癌端到端真实测试通过
+- **🏷️ 品牌文案通用化**：新增 `lib/branding.py` 集中管理标题/footer
+  - 胰腺癌保持「小胰宝」专属文案不变
+  - 其它病种走通用「小x宝{疾病中文}」文案（标题带疾病中文名，footer 引导 opencare 社区）
+  - 含疾病英中映射表，未命中的罕见病等回退原文
+- **📚 开发约定**：品牌文案统一从 `lib/branding.py` 取，禁止业务代码硬编码
 
 ### v2.2.0 (2026-06-17)
 

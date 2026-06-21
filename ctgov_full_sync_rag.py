@@ -11,6 +11,7 @@ load_dotenv()
 # LLM 配置已抽取到 lib/llm_client.py(消除多文件重复)
 # 全文翻译使用 PROMPT_FULL_MARKDOWN(保留原有 Markdown 结构)
 from lib.llm_client import translate_text as _translate_base, PROMPT_FULL_MARKDOWN
+from lib.branding import get_footer, is_pancreatic
 
 def translate_text(text):
     """
@@ -158,8 +159,11 @@ def process_pending_sync():
                 # 直接对全文 Markdown 进行精翻
                 md_cn = translate_text(md_en)
                 
-                # 追加社区公益脚注
-                footer = "\n\n---\n**以上由小胰宝社区志愿者❤️服务提供，支持公益社区发展，关注“小胰宝助手”公众号，携手推动社区公益发展！**"
+                # 追加社区公益脚注(胰腺癌专属 / 其它疾病通用,按目录名对应的疾病判断)
+                # folder.name 形如 "2026-06-21-Breast_Cancer",提取日期后的疾病名
+                folder_disease = "-".join(folder.name.split("-")[3:]).replace("_", " ")
+                footer_text = get_footer(folder_disease).lstrip("* ").strip()
+                footer = f"\n\n---\n**{footer_text}**"
                 md_cn += footer
 
                 # 生成描述性文件名 (Date-NCT-Title)

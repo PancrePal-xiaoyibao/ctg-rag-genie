@@ -71,8 +71,9 @@ def parse_report_content(file_path):
             part = part.strip()
             if not part:
                 continue
-            # 最后一部分如果包含"以上由小胰宝"则是 footer
-            if "以上由小胰宝" in part or "小胰宝社区志愿者" in part:
+            # 最后一部分如果是社区公益脚注则为 footer
+            # 兼容胰腺癌「以上由小胰宝...」和通用「以上由小x宝...」两种文案
+            if "以上由小" in part or "社区志愿者" in part:
                 footer = part
             else:
                 detail_groups.append(part)

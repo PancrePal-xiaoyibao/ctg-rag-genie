@@ -29,10 +29,11 @@ from lib.llm_client import translate_text as translate_to_chinese
 from lib.study_data import sanitize_filename, save_study_json
 from lib.channels.telegram import send_msg as send_telegram_msg
 from lib.channels.gewe import send_text as send_gewe_text, send_card as send_gewe_card
+from lib.branding import get_title, get_footer, disease_cn_name
 
 load_dotenv()
 
-# 搜索条件(用于报告文件命名,与重构前一致)
+# 搜索条件(疾病名,用于抓取过滤和报告文件命名;改 .env 的 SEARCH_CONDITION 即可切换疾病)
 SEARCH_CONDITION = os.getenv("SEARCH_CONDITION", "Pancreatic Cancer")
 
 
@@ -106,7 +107,7 @@ def send_telegram_combined(studies):
     同时落地推送报告 telegram_push_report.txt。
     """
     if not studies:
-        msg = (f"# 🏥 小胰宝临床情报小组日报\n\n"
+        msg = (f"# {get_title()}\n\n"
                f"今日未发现过去 30 天内更新且符合条件的临床试验。\n"
                f"更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         send_telegram_msg(msg)
@@ -124,17 +125,17 @@ def send_telegram_combined(studies):
     report_file = os.path.join(base_dir, "telegram_push_report.txt")
 
     with open(report_file, "w", encoding="utf-8") as rf:
-        rf.write(f"# 🏥 小胰宝临床情报小组日报 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n\n")
-        rf.write(f"## 🔬 胰腺癌临床试验每日更新\n\n")
+        rf.write(f"# {get_title()} ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n\n")
+        rf.write(f"## 🔬 {disease_cn_name(SEARCH_CONDITION)}临床试验每日更新\n\n")
         rf.write(f"- 监测日期: 最近30天\n")
-        rf.write(f"- 监测要素：#胰腺癌 #KRAS/TP53/ATM/BRCA/PMT5/HER2/ERBB2相关突变\n\n")
+        rf.write(f"- 监测要素：#{disease_cn_name(SEARCH_CONDITION)}相关临床试验动态\n\n")
 
         # 1. 汇总列表
         print(f"[{datetime.now()}] Preparing summary list for {len(studies)} studies...")
         rf.write(f"### 发现 {len(studies)} 个符合条件的临床试验 (过去 30 天内更新)\n\n")
         rf.write(f"## 【汇总清单】\n")
 
-        summary_msg = f"# 🏥 小胰宝临床情报小组日报\n\n发现 {len(studies)} 个符合条件的临床试验\n\n## 【汇总清单】\n"
+        summary_msg = f"# {get_title()}\n\n发现 {len(studies)} 个符合条件的临床试验\n\n## 【汇总清单】\n"
         for i, study in enumerate(studies):
             nct_id = get_nct_id(study)
             brief_title = study.get("protocolSection", {}).get("identificationModule", {}).get("briefTitle", "N/A")
@@ -168,7 +169,7 @@ def send_telegram_combined(studies):
             total_groups = (len(studies) + group_size - 1) // group_size
 
             print(f"[{datetime.now()}] Preparing detail group {group_num}/{total_groups}...")
-            detail_header = f"## 🔔 胰腺癌临床试验详情 ({group_num}/{total_groups})\n\n"
+            detail_header = f"## 🔔 {disease_cn_name(SEARCH_CONDITION)}临床试验详情 ({group_num}/{total_groups})\n\n"
             group_details = ""
             for j, study in enumerate(group):
                 current_idx = i + j + 1
@@ -185,8 +186,8 @@ def send_telegram_combined(studies):
                 print(f"⚠️  微信详情推送失败(不影响TG): {e}")
             rf.write(full_detail_group + "\n" + "="*50 + "\n\n")
 
-        # 3. 结尾感谢
-        footer = "** 以上由小胰宝社区志愿者 ❤️ 服务提供，支持公益社区发展，关注“小胰宝助手”公众号，携手推动社区公益发展！"
+        # 3. 结尾感谢(胰腺癌专属 / 其它疾病通用)
+        footer = get_footer()
         send_telegram_msg(footer)
         try:
             send_gewe_text(footer)

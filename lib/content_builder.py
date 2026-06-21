@@ -26,6 +26,7 @@ from lib.ctgov_api import has_china_center, get_nct_id
 from lib.llm_client import translate_text as translate_to_chinese
 from lib.study_data import sanitize_filename, save_study_json
 from lib.text_utils import parse_list_config
+from lib.branding import get_title, get_footer, disease_cn_name
 
 load_dotenv()
 
@@ -86,7 +87,7 @@ def format_study_detail(study):
     return detail, translated_info
 
 
-def build_push_content(studies, auto_save_json=True):
+def build_push_content(studies, auto_save_json=True, condition=None):
     """
     阶段1:批量处理所有 studies。
     - 翻译每个试验(标题/状态/适应症)
@@ -96,6 +97,8 @@ def build_push_content(studies, auto_save_json=True):
     参数:
         studies:        原始 study 对象列表
         auto_save_json: True 时落地每个 study 到 output/{date}-{condition}/{nct}.json
+        condition:      疾病条件(用于目录命名)。None 时回退到 .env 的 SEARCH_CONDITION。
+                        这样命令行 --condition 能正确反映到落地目录名。
 
     返回:
         dict,含 studies/summary_msg/detail_groups/footer/report_file/study_details
@@ -105,21 +108,23 @@ def build_push_content(studies, auto_save_json=True):
         return None
 
     # 准备目录和报告文件
+    # 优先用传入的 condition(来自 --condition),回退到 .env 的 SEARCH_CONDITION
+    effective_condition = condition or SEARCH_CONDITION
     date_str = datetime.now().strftime('%Y-%m-%d')
-    folder_name = f"{date_str}-{sanitize_filename(SEARCH_CONDITION)}"
+    folder_name = f"{date_str}-{sanitize_filename(effective_condition)}"
     base_dir = os.path.join("output", folder_name)
     os.makedirs(base_dir, exist_ok=True)
     report_file = os.path.join(base_dir, "telegram_push_report.txt")
 
-    summary_msg = f"# 🏥 小胰宝临床情报小组日报\n\n发现 {len(studies)} 个符合条件的临床试验\n\n## 【汇总清单】\n"
+    summary_msg = f"# {get_title(effective_condition)}\n\n发现 {len(studies)} 个符合条件的临床试验\n\n## 【汇总清单】\n"
     study_details = []  # 每个试验的 (nct_id, detail_text, translated_info)
     total = len(studies)
 
     with open(report_file, "w", encoding="utf-8") as rf:
-        rf.write(f"# 🏥 小胰宝临床情报小组日报 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n\n")
-        rf.write(f"## 🔬 胰腺癌临床试验每日更新\n\n")
+        rf.write(f"# {get_title(effective_condition)} ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n\n")
+        rf.write(f"## 🔬 {disease_cn_name(effective_condition)}临床试验每日更新\n\n")
         rf.write(f"- 监测日期: 最近30天\n")
-        rf.write(f"- 监测要素：#胰腺癌 #KRAS/TP53/ATM/BRCA/PMT5/HER2/ERBB2相关突变\n\n")
+        rf.write(f"- 监测要素：#{disease_cn_name(effective_condition)}相关临床试验动态\n\n")
         rf.write(f"### 发现 {total} 个符合条件的临床试验\n\n")
         rf.write(f"## 【汇总清单】\n")
 
@@ -147,7 +152,7 @@ def build_push_content(studies, auto_save_json=True):
             total_groups = (total + group_size - 1) // group_size
 
             print(f"[{datetime.now()}] 生成详情组 {group_num}/{total_groups}...")
-            detail_header = f"## 🔔 胰腺癌临床试验详情 ({group_num}/{total_groups})\n\n"
+            detail_header = f"## 🔔 {disease_cn_name(effective_condition)}临床试验详情 ({group_num}/{total_groups})\n\n"
             group_details = ""
             for j, study in enumerate(group):
                 current_idx = i + j + 1
@@ -166,8 +171,8 @@ def build_push_content(studies, auto_save_json=True):
             detail_groups.append(full_detail_group)
             rf.write(full_detail_group + "\n" + "="*50 + "\n\n")
 
-        # footer
-        footer = "** 以上由小胰宝社区志愿者 ❤️ 服务提供，支持公益社区发展，关注“小胰宝助手”公众号，携手推动社区公益发展！"
+        # footer(胰腺癌专属 / 其它疾病通用)
+        footer = get_footer(effective_condition)
         rf.write(footer + "\n")
 
     print(f"[{datetime.now()}] 报告已保存: {report_file}")

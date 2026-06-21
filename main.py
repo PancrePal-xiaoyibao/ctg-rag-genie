@@ -280,7 +280,7 @@ def run_cli_mode(args):
     # 一次性翻译 + 落地 JSON + 生成内容(不再单篇推送)
     auto_save = get_workflow_setting("auto_save_json", True)
     print(f"\n🔄 阶段1:批量翻译 + 落地 JSON + 生成推送内容...")
-    content = build_push_content(studies, auto_save_json=auto_save)
+    content = build_push_content(studies, auto_save_json=auto_save, condition=args.condition)
     if not content:
         print("⚠️  内容生成失败")
         return
