@@ -33,6 +33,12 @@ env/
 *~
 .qoder/
 
+
+#configure
+openclaw.json
+*.backup
+
+
 # OS
 .DS_Store
 Thumbs.db
