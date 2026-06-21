@@ -474,16 +474,33 @@ def interactive_menu():
     print("📋 主菜单\n")
     print("1️⃣  自动流程 (抓取 → 翻译 → 上传)")
     print("2️⃣  手动菜单 (单独执行各步骤)")
-    print("3️⃣  快捷推送: 10 个最近中国试验 → 微信卡片")
+    print("3️⃣  快捷推送: 10 个最近中国试验 → 微信文字 (GeWe 文字)")
+    print("4️⃣  快捷推送: 10 个最近中国试验 → 微信卡片 (需先在 config.yaml 开启 gewe_card)")
     print("0️⃣  退出")
 
-    choice = input("\n请选择 [0-3]: ").strip()
+    choice = input("\n请选择 [0-4]: ").strip()
     if choice == "1":
         auto_pipeline()
     elif choice == "2":
         manual_menu()
     elif choice == "3":
-        # 快捷入口:复用 CLI 模式
+        # 快捷入口:复用 CLI 模式,推 GeWe 文字(TG 切片格式转纯文本,默认开启)
+        args = argparse.Namespace(
+            china=True, latest=True, top=10, condition=None, status=None, days_back=0,
+            send_tg=False, send_gewe_card=False, send_gewe_txt=True,
+            send_feishu=False, send_fastgpt=False,
+            channels=None, no_channels=None, all_channels=False
+        )
+        run_cli_mode(args)
+    elif choice == "4":
+        # 快捷入口:推 GeWe 卡片(appmsg 可跳转卡片)
+        # ⚠️ 卡片默认关闭(channels.gewe_card=false),需用户先在 config.yaml 开启后使用。
+        from lib.config import load_config
+        if not load_config()["channels"].get("gewe_card", False):
+            print("\n⚠️  微信卡片推送默认关闭。")
+            print("   请先在 config.yaml 中设置 channels.gewe_card: true,")
+            print("   或运行时加 --send-gewe-card 参数强制开启后重试。")
+            return
         args = argparse.Namespace(
             china=True, latest=True, top=10, condition=None, status=None, days_back=0,
             send_tg=False, send_gewe_card=True, send_gewe_txt=False,
