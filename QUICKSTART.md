@@ -1,6 +1,6 @@
-# FastGPT 文件库快速开始指南
+# 小胰宝临床试验订阅系统 - 快速开始
 
-**5 分钟快速搭建本地文件库 → FastGPT 同步服务**
+**5 分钟上手：从环境配置到微信推送一条临床试验**
 
 ---
 
@@ -8,367 +8,273 @@
 
 ```bash
 ✓ Python 3.10+
-✓ FastGPT 账户（云版或自部署）
-✓ 本地文件目录（待同步）
+✓ uv 或 pip（推荐 uv）
+✓ .env 凭据文件（见 Step 3）
 ```
 
 ---
 
-## Step 1: 创建项目目录 (1 min)
+## Step 1: 克隆项目 (1 min)
 
 ```bash
-mkdir fastgpt-file-sync && cd fastgpt-file-sync
-
-# 创建虚拟环境
-python3 -m venv venv
-source venv/bin/activate  # Linux/Mac 或 venv\Scripts\activate (Windows)
+git clone <your-repo-url> clinicaltrials推送和订阅
+cd clinicaltrials推送和订阅
 ```
 
 ---
 
-## Step 2: 安装依赖 (1 min)
+## Step 2: 安装环境 (1 min)
 
 ```bash
-# 创建 requirements.txt
-cat > requirements.txt << 'EOF'
-fastapi==0.104.1
-uvicorn==0.24.0
-python-dotenv==1.0.0
-watchdog==3.0.0
-apscheduler==3.10.4
-EOF
+# 使用 uv（推荐）
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install requests python-dotenv openai
 
-pip install -r requirements.txt
+# 或使用传统 pip
+# python3 -m venv .venv
+# source .venv/bin/activate
+# pip install -r requirements.txt
 ```
 
 ---
 
-## Step 3: 创建配置文件 (1 min)
+## Step 3: 配置凭据 (2 min)
+
+复制模板并填写真实值：
 
 ```bash
-cat > .env << 'EOF'
-# 本地文件目录路径
-LOCAL_DIR=/Users/qinxiaoqiang/Downloads/report_mess
+cp .env.example .env
+cp assets/config.yaml.template config.yaml   # 若不存在
+```
 
-# API 认证 Token（生成方式：openssl rand -hex 32）
-API_TOKEN=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
+编辑 `.env`：
 
-# 服务端口
-PORT=8000
-EOF
+```bash
+# LLM 配置（至少配一个，建议多配几个做 fallback）
+QWEN_API_KEY=your_key
+ZHIPU_API_KEY=your_key
+STEP_API_KEY=your_key
+GEMINI_API_KEY=your_key
+
+# FastGPT 配置
+FASTGPT_BASE_URL=https://your-domain.com/api
+FASTGPT_API_KEY=openapi-your-key
+FASTGPT_DATASET_ID=your_dataset_id
+
+# Telegram 配置
+TELEGRAM_BOT_TOKEN=your_token
+TELEGRAM_CHAT_ID=your_id
+
+# GeWe 微信群推送（可选）
+GEWE_ENABLED=false
+GEWE_API_HOST=api.geweapi.com
+GEWE_APP_ID=your_app_id
+GEWE_TOKEN=your_token
+GEWE_TO_WXID=["group-wxid-1","group-wxid-2"]
+```
+
+> 🔒 **安全提示**：`.env` 和 `config.yaml` 已在 `.gitignore` 中，**永远不要**提交含真实密钥的文件到 git。
+
+---
+
+## Step 4: CLI 指令速查
+
+### 4.1 抓取过滤器（阶段 1）
+
+控制从 ClinicalTrials.gov 抓哪些试验。
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--condition "疾病名"` | 指定病种（默认 Pancreatic Cancer） | `--condition "Lymphoma"` |
+| `--china` | 仅抓取含中国中心的试验 | `--china` |
+| `--top N` / `--N` | 取前 N 个试验（简写 `--5` = `--top 5`） | `--top 5` |
+| `--status STATUS` | 试验状态（默认 RECRUITING） | `--status "ACTIVE_NOT_RECRUITING"` |
+| `--days-back N` | 时间窗天数（0 = 不过滤） | `--days-back 0` |
+| `--latest` | 按最近更新排序（默认开启） | `--latest` |
+
+### 4.2 推送开关（阶段 2）
+
+控制推送到哪些渠道。优先级：**CLI 参数 > config.yaml 默认值**。
+
+| 参数 | 说明 | config.yaml 默认 |
+|------|------|-----------------|
+| `--send-tg` | Telegram | `true` |
+| `--send-gewe-txt` | GeWe **文字**推送 | `true` |
+| `--send-gewe-card` | GeWe **卡片**推送 | `false`（需显式开启） |
+| `--send-feishu` | 飞书交互卡片 | `true` |
+| `--send-fastgpt` | FastGPT 知识库同步 | `true` |
+
+### 4.3 多渠道简写
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--channels 列表` | 逗号分隔多渠道同时推送 | `--channels tg,gewe_txt` |
+| `--all-channels` | 开启所有渠道 | `--all-channels` |
+| `--no-channels 列表` | 排除指定渠道 | `--no-channels gewe_card` |
+
+### 4.4 交互菜单（无参数进入）
+
+```bash
+python3 main.py
+```
+
+```
+📋 主菜单
+
+1️⃣  自动流程 (抓取 → 翻译 → 上传)
+2️⃣  手动菜单 (单独执行各步骤)
+3️⃣  快捷推送: 10 个最近中国试验 → 微信文字 (GeWe 文字)  ← 默认开启，开箱即用
+4️⃣  快捷推送: 10 个最近中国试验 → 微信卡片 (需先在 config.yaml 开启 gewe_card)
+0️⃣  退出
+```
+
+### 4.5 独立子脚本（供 cron / 手动调用）
+
+```bash
+python3 daily_ctgov_check_tgbot.py        # 阶段1：抓取 + TG 简报
+python3 ctgov_full_sync_rag.py            # 阶段1：RAG 精翻（JSON → 中文 Markdown）
+python3 fastgpt_sync.py --once --mode=today   # 阶段2：同步当天文件到 FastGPT
+python3 fastgpt_sync.py --once --mode=all     # 阶段2：同步全部历史文件
+python3 push_existing_report.py --latest --send-gewe-txt  # 补发最新报告到微信
 ```
 
 ---
 
-## Step 4: 创建应用代码 (1 min)
+## Step 5: 常用指令示例
+
+### 🎯 场景 1：测试搜索 + 微信推送（单条）
 
 ```bash
-cat > main.py << 'EOF'
-from fastapi import FastAPI, Header, HTTPException, Query
-from pydantic import BaseModel
-from typing import Optional, List
-from pathlib import Path
-import os
-from datetime import datetime
-from dotenv import load_dotenv
+# 搜索淋巴瘤美国临床试验，推微信文字，不过滤时间
+python3 main.py --condition "Lymphoma" --top 1 --send-gewe-txt --days-back 0
+```
 
-load_dotenv()
+### 🎯 场景 2：中国中心 + 多渠道推送
 
-app = FastAPI()
+```bash
+# 搜索中国中心的乳腺癌，推 Telegram + 微信文字
+python3 main.py --condition "Breast Cancer" --china --top 10 --channels tg,gewe_txt
+```
 
-LOCAL_DIR = Path(os.getenv("LOCAL_DIR", "/data/documents"))
-API_TOKEN = os.getenv("API_TOKEN", "test-token")
+### 🎯 场景 3：仅抓取不推送（生成 JSON 供后续处理）
 
-# ==================== 数据模型 ====================
+```bash
+python3 main.py --china --top 20 --condition "Lung Cancer"
+# 阶段1 完成后不进入阶段2，JSON 落地在 output/{date}-Lung_Cancer/
+```
 
-class FileListItem(BaseModel):
-    id: str
-    parentId: Optional[str]
-    type: str
-    name: str
-    updateTime: datetime
-    createTime: datetime
+### 🎯 场景 4：全渠道推送当天试验
 
-# ==================== 认证 ====================
+```bash
+python3 main.py --all-channels
+```
 
-def verify_token(authorization: str = Header(None)) -> bool:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401)
-    if authorization.replace("Bearer ", "") != API_TOKEN:
-        raise HTTPException(status_code=403)
-    return True
+### 🎯 场景 5：定时任务（cron）
 
-# ==================== 工具函数 ====================
+```bash
+# 自动全流程：抓取 → 翻译 → FastGPT 同步
+python3 main.py --auto
+```
 
-def get_file_tree(parent_id: Optional[str] = None) -> List[dict]:
-    items = []
-    if parent_id is None:
-        search_dir = LOCAL_DIR
-    else:
-        search_dir = LOCAL_DIR / parent_id
-    
-    if not search_dir.exists():
-        return items
-    
-    for item in search_dir.iterdir():
-        if item.name.startswith('.'):
-            continue
-        items.append({
-            "id": str(item.relative_to(LOCAL_DIR)),
-            "parentId": parent_id,
-            "type": "folder" if item.is_dir() else "file",
-            "name": item.name,
-            "updateTime": datetime.fromtimestamp(item.stat().st_mtime).isoformat(),
-            "createTime": datetime.fromtimestamp(item.stat().st_ctime).isoformat()
-        })
-    return items
+### 🎯 场景 6：补发已有报告
 
-def read_file_content(file_id: str) -> Optional[str]:
-    file_path = LOCAL_DIR / file_id
-    if not file_path.exists() or file_path.is_dir():
-        return None
-    try:
-        return file_path.read_text(encoding='utf-8')
-    except:
-        return None
+```bash
+# 推送最新报告到微信文字
+python3 push_existing_report.py --latest --send-gewe-txt
 
-# ==================== API 端点 ====================
-
-@app.post("/v1/file/list")
-async def list_files(
-    parentId: Optional[str] = None,
-    searchKey: str = "",
-    authorization: str = Header(None)
-):
-    verify_token(authorization)
-    items = get_file_tree(parentId)
-    return {
-        "code": 200,
-        "success": True,
-        "data": items
-    }
-
-@app.get("/v1/file/content")
-async def get_file_content(
-    id: str = Query(...),
-    authorization: str = Header(None)
-):
-    verify_token(authorization)
-    content = read_file_content(id)
-    return {
-        "code": 200,
-        "success": True,
-        "data": {
-            "title": Path(id).name,
-            "content": content,
-            "previewUrl": None
-        }
-    }
-
-@app.get("/v1/file/read")
-async def get_file_read_link(
-    id: str = Query(...),
-    authorization: str = Header(None)
-):
-    verify_token(authorization)
-    return {
-        "code": 200,
-        "success": True,
-        "data": {
-            "url": f"http://localhost:8000/files/{id}"
-        }
-    }
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
-EOF
+# 推送指定文件到多个渠道
+python3 push_existing_report.py \
+  --file output/2026-06-21-Lymphoma/telegram_push_report.txt \
+  --channels tg,gewe_txt,feishu
 ```
 
 ---
 
-## Step 5: 启动服务 (1 min)
+## Step 6: 验证运行
+
+运行一条测试指令，观察输出：
 
 ```bash
-python main.py
-# 输出：
-# INFO:     Uvicorn running on http://0.0.0.0:8000
-# 按 Ctrl+C 停止
+python3 main.py --condition "Lymphoma" --top 1 --send-gewe-txt --days-back 0
+```
+
+预期输出：
+
+```
+============================================================
+🏥 小胰宝临床试验智能订阅系统
+============================================================
+
+🔍 阶段1:抓取试验(condition=Lymphoma, china=False, top=1, days_back=0)
+   抓取到 1 个试验
+   1. NCT04269902 | Testing Early Treatment for Patients Wit...
+
+🔄 阶段1:批量翻译 + 落地 JSON + 生成推送内容...
+   ✅ 翻译完成:1 个试验,生成 1 组详情
+
+📤 阶段2:推送到 1 个渠道: gewe_txt
+   GeWe 文字: 汇总 + 1 组详情 + footer 已发送
+
+============================================================
+✅ 全部完成:阶段1 抓取翻译 1 个,阶段2 推送 1 个渠道
+============================================================
 ```
 
 ---
 
-## Step 6: 在 FastGPT 中创建 API 文件库
+## 🛠️ 切换病种（v3.0.0+）
 
-### 6.1 登录 FastGPT
+系统支持任意癌症/罕见病，一次运行一种疾病：
 
-访问你的 FastGPT 实例（e.g., https://your-fastgpt.com）
+```bash
+# 各类癌症
+python3 main.py --top 1 --condition "Breast Cancer" --china --send-gewe-txt    # 乳腺癌
+python3 main.py --top 1 --condition "Lung Cancer" --china --send-gewe-txt      # 肺癌
+python3 main.py --top 1 --condition "Gastric Cancer" --china --send-gewe-txt   # 胃癌
 
-### 6.2 创建知识库
-
-1. 点击 **"创建知识库"**
-2. 选择 **"API 文件库"** 类型
-3. 填入配置：
-
-```
-名称: 本地文件库
-描述: 本地文件同步服务
-baseURL: http://localhost:8000
-authorization: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
+# 罕见病
+python3 main.py --top 5 --condition "Gaucher Disease" --china                  # 戈谢病
 ```
 
-### 6.3 测试连接
-
-点击 **"测试连接"** → 应该看到 ✅ 成功
-
-### 6.4 导入文件
-
-1. 点击 **"同步文件"**
-2. FastGPT 会显示你本地目录的文件列表
-3. 选择要导入的文件
-4. 点击 **"导入"**
+落地目录、报告标题、FastGPT 集合名会自动按病种区分。新增病种中文映射见 `lib/branding.py` 的 `_DISEASE_CN`。
 
 ---
 
-## Step 7: 验证
-
-### 在 FastGPT 中测试对话
+## 📁 输出目录结构
 
 ```
-用户: 这个文件的内容是什么？
-FastGPT: [根据导入的文件内容回答]
-```
-
-### 测试 API
-
-```bash
-# 获取文件列表
-curl -X POST http://localhost:8000/v1/file/list \
-  -H "Authorization: Bearer a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6" \
-  -H "Content-Type: application/json" \
-  -d '{"parentId": null}'
-
-# 预期输出
-{
-  "code": 200,
-  "success": true,
-  "data": [
-    {"id": "file1.md", "name": "file1.md", "type": "file", ...},
-    {"id": "folder1", "name": "folder1", "type": "folder", ...}
-  ]
-}
+output/
+└── 2026-06-21-Lymphoma/
+    ├── NCT04269902.json              # 原始试验数据（sync_status=pending）
+    ├── telegram_push_report.txt      # 推送简报（TG/GeWe 消费）
+    ├── cn/
+    │   └── 2026-06-21-NCT04269902-...-zh.md   # 中文精翻（FastGPT 消费）
+    └── en/
+        └── 2026-06-21-NCT04269902-....md      # 英文原文
 ```
 
 ---
 
-## ✅ 完成！
+## ❓ 常见问题
 
-现在你有了一个工作的本地文件库同步服务 🎉
+**Q: 微信推送失败但 TG 正常？**
+A: 检查 `.env` 中 `GEWE_ENABLED=true` 且 `GEWE_APP_ID`/`GEWE_TOKEN`/`GEWE_TO_WXID` 已正确配置。GeWe 失败不影响 TG 主渠道。
 
-### 后续可选优化
+**Q: 如何只推微信不推 Telegram？**
+A: `python3 main.py --top 1 --send-gewe-txt --no-channels tg` 或改 `config.yaml` 中 `tg: false`。
 
-#### 1️⃣ 添加文件监控（实时同步）
+**Q: 微信卡片怎么开？**
+A: 编辑 `config.yaml` 设置 `channels.gewe_card: true`，然后运行时加 `--send-gewe-card`。
 
-```bash
-pip install watchdog
+**Q: `--days-back 0` 是什么意思？**
+A: 0 表示**不限制**时间窗，抓取 API 返回的全部结果。默认 30 天。
 
-# 修改 main.py，添加以下代码：
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-
-class FileChangeHandler(FileSystemEventHandler):
-    def on_modified(self, event):
-        if not event.is_directory:
-            print(f"文件变化: {event.src_path}")
-            # 这里可以触发 FastGPT 同步
-
-observer = Observer()
-observer.schedule(FileChangeHandler(), str(LOCAL_DIR), recursive=True)
-observer.start()
-```
-
-#### 2️⃣ 添加定时任务
-
-```bash
-pip install apscheduler
-
-# 在 main.py 中添加：
-from apscheduler.schedulers.background import BackgroundScheduler
-
-def sync_job():
-    print("定时同步任务运行中...")
-
-scheduler = BackgroundScheduler()
-scheduler.add_job(sync_job, 'cron', hour=0)  # 每天午夜运行
-scheduler.start()
-```
-
-#### 3️⃣ Docker 部署
-
-```bash
-# 创建 Dockerfile
-cat > Dockerfile << 'EOF'
-FROM python:3.10-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY main.py .
-COPY .env .
-CMD ["python", "main.py"]
-EOF
-
-# 构建并运行
-docker build -t fastgpt-sync .
-docker run -d -p 8000:8000 \
-  -e LOCAL_DIR=/data/documents \
-  -v /path/to/documents:/data/documents:ro \
-  fastgpt-sync
-```
+**Q: 支持 Windows 吗？**
+A: 代码本身跨平台，但 GeWe 推送依赖个人微信生态，建议在 Linux/Mac 服务器上部署。
 
 ---
 
-## 常见问题
+**🎉 完成！你现在可以按需搜索任意病种的临床试验并推送到微信/TG/飞书/FastGPT 了。**
 
-### Q: 如何生成安全的 API Token？
-
-```bash
-# 方式 1: OpenSSL
-openssl rand -hex 32
-
-# 方式 2: Python
-python3 -c "import secrets; print(secrets.token_hex(32))"
-```
-
-### Q: 文件权限不足怎么办？
-
-```bash
-# 检查文件权限
-ls -la /Users/qinxiaoqiang/Downloads/report_mess
-
-# 如果需要，修改权限
-chmod -R 755 /Users/qinxiaoqiang/Downloads/report_mess
-```
-
-### Q: 如何更改监听端口？
-
-编辑 `.env` 文件，修改 `PORT=8000` 为其他端口，然后重启服务
-
-### Q: 如何配置 HTTPS？
-
-使用 Nginx 反向代理加 SSL 证书（见完整设计文档）
-
----
-
-## 需要帮助？
-
-- 📖 查看完整设计文档: `FASTGPT_LOCAL_FILE_SYNC_DESIGN.md`
-- 🐛 检查日志: `python main.py` 的输出
-- 🔗 测试 API 连接: `curl http://localhost:8000/health`
-
----
-
-**祝你使用愉快！** 🚀
+更多架构细节见 [README.md](./README.md)，配置项逐条说明见 `references/config-reference.md`。

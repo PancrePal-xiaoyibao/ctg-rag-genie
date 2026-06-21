@@ -186,6 +186,58 @@ python3 main.py
 python3 main.py --auto
 ```
 
+#### 📘 CLI 指令速查
+
+**抓取过滤器（阶段 1）**
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--condition "疾病名"` | 指定病种（默认 Pancreatic Cancer） | `--condition "Lymphoma"` |
+| `--china` | 仅抓取含中国中心的试验 | `--china` |
+| `--top N` / `--N` | 取前 N 个试验（简写 `--5` = `--top 5`） | `--top 5` |
+| `--status STATUS` | 试验状态（默认 RECRUITING） | `--status "ACTIVE_NOT_RECRUITING"` |
+| `--days-back N` | 时间窗天数（0 = 不过滤） | `--days-back 0` |
+| `--latest` | 按最近更新排序（默认开启） | `--latest` |
+
+**推送开关（阶段 2）**
+
+| 参数 | 说明 | config.yaml 默认 |
+|------|------|-----------------|
+| `--send-tg` | Telegram | `true` |
+| `--send-gewe-txt` | GeWe **文字**推送 | `true` |
+| `--send-gewe-card` | GeWe **卡片**推送 | `false`（需显式开启） |
+| `--send-feishu` | 飞书交互卡片 | `true` |
+| `--send-fastgpt` | FastGPT 知识库同步 | `true` |
+
+**多渠道简写**
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--channels 列表` | 逗号分隔多渠道同时推送 | `--channels tg,gewe_txt` |
+| `--all-channels` | 开启所有渠道 | `--all-channels` |
+| `--no-channels 列表` | 排除指定渠道 | `--no-channels gewe_card` |
+
+> 💡 **优先级**：CLI 参数 > `config.yaml` 默认值。例如 `config.yaml` 中 `gewe_card: false`，但运行时加 `--send-gewe-card` 可强制开启。
+
+**常用完整指令**
+
+```bash
+# 搜索淋巴瘤，推微信文字（全球范围，不过滤时间）
+python3 main.py --condition "Lymphoma" --top 1 --send-gewe-txt --days-back 0
+
+# 中国中心的乳腺癌，推 Telegram + 微信文字
+python3 main.py --condition "Breast Cancer" --china --top 10 --channels tg,gewe_txt
+
+# 全渠道推送当天试验
+python3 main.py --all-channels
+
+# 仅抓取不推送（落地 JSON 供后续处理）
+python3 main.py --china --top 20 --condition "Lung Cancer"
+
+# 自动全流程（适合 cron 定时任务）
+python3 main.py --auto
+```
+
 #### 🌐 切换病种（v3.0.0 新增）
 
 支持任意癌症/罕见病，通过 `--condition` 临时切换或改 `.env` 的 `SEARCH_CONDITION` 长期固定：
